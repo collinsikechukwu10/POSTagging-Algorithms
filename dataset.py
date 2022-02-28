@@ -5,6 +5,7 @@ from conllu.models import Token
 
 from utils import conllu_corpus, get_words_and_tags
 
+DEFAULT_TREEBANKS_PATH = os.path.join(os.path.dirname(__file__), "treebanks")
 START_TAG = "<s>"
 END_TAG = "</s>"
 
@@ -48,6 +49,7 @@ class SentenceDataset:
 
 class TreeBankDataset:
     def __init__(self, tree_bank_directory):
+        self._name = tree_bank_directory
         conllu_files = os.listdir(tree_bank_directory)
         train_corpus = list(filter(lambda i: "train.conllu" in i, conllu_files))[0]
         test_corpus = list(filter(lambda i: "test.conllu" in i, conllu_files))[0]
@@ -65,6 +67,39 @@ class TreeBankDataset:
     def test_data(self) -> SentenceDataset:
         return self._test_dataset
 
+    def name(self):
+        return self._name
+
 
 def prepare_datasets(main_directory) -> Iterable[TreeBankDataset]:
     return [TreeBankDataset(os.path.join(main_directory, treebank)) for treebank in os.listdir(main_directory)]
+
+
+def is_conllu_language_dataset_folder(directory):
+    # only has the conllu specific files for a language
+    if os.path.isdir(directory):
+        sub_files = list(map(lambda i: os.path.join(directory, i), os.listdir(directory)))
+        return any(map(lambda i: ".conllu" in i, sub_files))
+    return False
+
+
+def get_datasets_folders(directory):
+    folders = []
+    if os.path.isdir(directory):
+        if is_conllu_language_dataset_folder(directory):
+            folders += [directory]
+        else:
+            for sub_file in list(map(lambda i: os.path.join(directory, i), os.listdir(directory))):
+                folders += get_datasets_folders(sub_file)
+    return folders
+
+
+def resolve_datasets(dataset_dir: str) -> Iterable[TreeBankDataset]:
+    datasets = []
+    if dataset_dir == "all" or datasets == "":
+        # run all data sets that exists based on the default path
+        datasets += get_datasets_folders(DEFAULT_TREEBANKS_PATH)
+    else:
+        datasets += get_datasets_folders(dataset_dir)
+    for dataset in datasets:
+        yield TreeBankDataset(dataset)

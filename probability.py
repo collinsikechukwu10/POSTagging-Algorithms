@@ -1,7 +1,7 @@
-from typing import List, Tuple, Dict, AnyStr
+from typing import List, Tuple, Dict, AnyStr, Set
 from nltk import FreqDist, WittenBellProbDist
 
-from gettingstarted import START_TAG, END_TAG
+from dataset import START_TAG, END_TAG, SentenceDataset
 
 
 # noinspection PyTypeChecker
@@ -12,14 +12,6 @@ class BiGramProbabilityMatrix:
         self._prior_unique_tags = unique_prior_tokens
         self._target_unique_tags = unique_target_tokens
 
-        # # get unique tags
-        # for (prior, target) in ngrams_list:
-        #     self._prior_unique_tags.add(prior)
-        #     self._target_unique_tags.add(target)
-
-        # # add start and end tags
-        # self._prior_unique_tags.add([START_TAG, END_TAG])
-        # self._target_unique_tags.add([START_TAG, END_TAG])
         for prior in self._prior_unique_tags:
             table[prior] = FreqDist()
 
@@ -48,10 +40,10 @@ class BiGramProbabilityMatrix:
     def infer(self, prior, target) -> float:
         return self._matrix[prior][target]
 
-    def get_unique_prior_tokens(self):
+    def get_unique_prior_tokens(self) -> Set[AnyStr]:
         return self._prior_unique_tags
 
-    def get_unique_target_tokens(self):
+    def get_unique_target_tokens(self) -> Set[AnyStr]:
         return self._target_unique_tags
 
     def print_table(self):
@@ -59,3 +51,17 @@ class BiGramProbabilityMatrix:
         print(format_row.format("", *self._target_unique_tags))
         for key, val in self._matrix.items():
             print(format_row.format(key, val.values()))
+
+
+def create_emission_probability_matrix(train_dataset: SentenceDataset):
+    return BiGramProbabilityMatrix(
+        unique_prior_tokens=train_dataset.unique_tags(),
+        unique_target_tokens=train_dataset.unique_vocabulary(),
+        ngrams_list=train_dataset.emmisions())
+
+
+def create_transition_probability_matrix(train_dataset: SentenceDataset):
+    return BiGramProbabilityMatrix(
+        unique_prior_tokens=train_dataset.unique_tags(),
+        unique_target_tokens=train_dataset.unique_tags(),
+        ngrams_list=train_dataset.transitions())

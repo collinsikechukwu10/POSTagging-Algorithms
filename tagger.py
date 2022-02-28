@@ -1,10 +1,14 @@
 from abc import abstractmethod
 from collections import defaultdict
 from math import log
-from typing import AnyStr, List
+from typing import AnyStr, List, Dict, Union, Type
 
-from gettingstarted import START_TAG, END_TAG
+from dataset import START_TAG, END_TAG
 from probability import BiGramProbabilityMatrix
+
+
+# TODO
+#  change alpha viterbi and beta table axes
 
 
 class POSTagger:
@@ -16,9 +20,13 @@ class POSTagger:
     def get_tags(self, list_of_tokens, as_mapping=False) -> List[AnyStr]:
         raise NotImplemented()
 
+    @classmethod
+    def name(cls):
+        return cls.__name__
+
 
 class EagerTagger(POSTagger):
-    def infer_tag(self, previous_tag, current_token) -> str:
+    def _infer_tag(self, previous_tag, current_token) -> str:
         # get all instances of t_i
         tagset = list(self._transition_matrix.get_unique_prior_tokens())
         tagset_probabilities = []
@@ -28,12 +36,12 @@ class EagerTagger(POSTagger):
             tagset_probabilities.append(transition_prob * emission_prob)
         return tagset[tagset_probabilities.index(max(tagset_probabilities))]
 
-    def get_tags(self, list_of_tokens, as_mapping=False):
+    def get_tags(self, list_of_tokens, as_mapping=False) -> Union[List[AnyStr], Dict[AnyStr, AnyStr]]:
         # gets tag from a sentence
         t_i = START_TAG
         predicted_tags = []
         for token in list_of_tokens:
-            t_i = self.infer_tag(t_i, token)
+            t_i = self._infer_tag(t_i, token)
             predicted_tags.append(t_i)
         if as_mapping:
             return dict((k, v) for k, v in zip(list_of_tokens, predicted_tags))
@@ -81,6 +89,44 @@ class VibertiPOSTagger(POSTagger):
                 b_table[tag].append(max_v_tag_prob_pair[0])
 
 
+# TODO Implemente MostProbable POS Tagger
 class MostProbablePOSTagger(POSTagger):
     def get_tags(self, list_of_tokens, as_mapping=False) -> List[AnyStr]:
-        pass
+        predicted_tags = list()
+        # perform forward pass
+        tagset = self._transition_matrix.get_unique_prior_tokens()
+        alpha_table = self._forward_track(tagset, list_of_tokens)
+        beta_table = self._backward_track(tagset, list_of_tokens)
+        # alpha and beta table should be the same size
+        gamma_table = dict()
+        for key in alpha_table:
+            # multiply alpha and beta table elementwise
+            gamma_table[key] = [a * b for a, b in zip(alpha_table[key], beta_table[key])]
+
+        return predicted_tags
+
+    def _forward_track(self, tag_set, list_of_tokens, alpha_start=None):
+        if alpha_start is None or len(alpha_start) != len(tag_set):
+            alpha_start = dict((k, 1) for k in tag_set)
+
+        return self._forward_track(tag_set, list_of_tokens, alpha_start)
+
+    def _backward_track(self, tag_set, list_of_tokens, beta_start=None):
+        if beta_start is None or len(beta_start) != len(tag_set):
+            beta_start = dict((k, 1) for k in tag_set)
+        return self._backward_track(tag_set, list_of_tokens, beta_start)
+
+
+def resolve_taggers(tagger_type) -> List[Type[POSTagger]]:
+    taggers = []
+    if tagger_type == "eager":
+        taggers.append(EagerTagger)
+    elif tagger_type == "viterbi":
+        taggers.append(VibertiPOSTagger)
+    elif tagger_type == "local_decoding":
+        taggers.append(MostProbablePOSTagger)
+    elif tagger_type == "all":
+        taggers.extend([EagerTagger, VibertiPOSTagger, MostProbablePOSTagger])
+    else:
+        raise Exception(f"Cannot resolve the tagger type [{tagger_type}]")
+    return taggers
