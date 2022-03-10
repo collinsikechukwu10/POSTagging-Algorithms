@@ -1,9 +1,11 @@
 from typing import List, Iterable, AnyStr, Tuple, Set
+
+from nltk import FreqDist
 from nltk.util import ngrams
 import os
 from conllu.models import Token
 
-from utils import conllu_corpus, get_words_and_tags
+from utils import conllu_corpus, get_words_and_tags, get_pos_tag
 
 DATASET_LIST = {
     "en": "UD_English-EWT",
@@ -35,9 +37,14 @@ class SentenceDataset:
             emissions += list(zip(tags, words))
             self._unique_tags.update(tags)
             self._unique_vocabulary.update(words)
+        # add start and end tag
         self._unique_tags.update([START_TAG, END_TAG])
         self._transitions = transitions
         self._emissions = emissions
+
+        # get freq dist for tags, used later for testing
+        self._pos_tag_freq_dist = FreqDist(
+            get_pos_tag(token).lower() for sentence in self._list_of_sentences for token in sentence)
 
     def __len__(self) -> int:
         return len(self._list_of_sentences)
@@ -57,10 +64,13 @@ class SentenceDataset:
     def unique_vocabulary(self) -> Set[AnyStr]:
         return self._unique_vocabulary
 
+    def get_pos_tag_freq_dist(self) -> FreqDist:
+        return self._pos_tag_freq_dist
+
 
 class TreeBankDataset:
     def __init__(self, tree_bank_directory):
-        self._name = tree_bank_directory
+        self._name = os.path.basename(tree_bank_directory)
         conllu_files = os.listdir(tree_bank_directory)
         train_corpus = list(filter(lambda i: "train.conllu" in i, conllu_files))[0]
         test_corpus = list(filter(lambda i: "test.conllu" in i, conllu_files))[0]
@@ -69,7 +79,7 @@ class TreeBankDataset:
         self._train_dataset = SentenceDataset(train_sentences)
         self._test_dataset = SentenceDataset(test_sentences)
 
-        print(f"Generating dataset for {train_corpus.replace('train.conllu', '')}" +
+        print(f"Generating dataset for {self._name}" +
               f" Sentences: [Training: {len(self._train_dataset)}], [Test: {len(self._test_dataset)}]")
 
     def train_data(self) -> SentenceDataset:

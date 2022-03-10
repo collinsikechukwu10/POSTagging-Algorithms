@@ -49,6 +49,15 @@ class POSTagger:
         """
         return dict((k, v) for k, v in zip(list_of_tokens, list_of_tags))
 
+    def get_tagset(self):
+        tagset = self._transition_matrix.get_unique_prior_tokens()
+        # remove start and end tag from tagset
+        if START_TAG in tagset:
+            tagset.remove(START_TAG)
+        if END_TAG in tagset:
+            tagset.remove(END_TAG)
+        return tagset
+
 
 class EagerTagger(POSTagger):
     def _infer_tag(self, previous_tag, current_token) -> str:
@@ -60,7 +69,7 @@ class EagerTagger(POSTagger):
         """
         # get all instances of t_i
         tagset_probabilities = []
-        for tag in self._transition_matrix.get_unique_prior_tokens():
+        for tag in self.get_tagset():
             transition_prob = self._transition_matrix.infer(prior=previous_tag, target=tag)
             emission_prob = self._emission_matrix.infer(prior=tag, target=current_token)
             tagset_probabilities.append((tag, transition_prob * emission_prob))
@@ -94,41 +103,57 @@ class VibertiPOSTagger(POSTagger):
         """
         predicted_tags = list()
         # perform forward pass
-        tagset = self._transition_matrix.get_unique_prior_tokens()
-        v_table, b_table = self._forward_track(tagset, list_of_tokens)
+        tagset = self.get_tagset()
+        _, b_table = self._forward_track(tagset, list_of_tokens)
         # backtrack the b table to find your optimal set
         # find the tag for the highest end tag probability
-        i = len(list_of_tokens)
-        while i >= 0:
-            max_tag_prob_pair = sorted([(k, v[i]) for k, v in b_table.items()], key=lambda v: v[1])[-1]
-            predicted_tags.append(max_tag_prob_pair[0])
-            i -= 1
+        tracker = END_TAG
+        for idx, v in reversed(b_table.items()):
+            if len(v) == 1:
+                key = list(v.keys())[0]
+                predicted_tags.append(key)
+                tracker = v[key]
+            else:
+                predicted_tags.append(tracker)
+                tracker = v[tracker]
+            # k = v
+        # while i >= 0:
+        #     max_tag_prob_pair = sorted([(k, v[i]) for k, v in b_table.items()], key=lambda v: v[1])[-1]
+        #     predicted_tags.append(max_tag_prob_pair[0])
+        #     i -= 1
         if as_mapping:
-            return self.as_mapping(list_of_tokens, reversed(predicted_tags)[1:-2])
-        return predicted_tags
+            return self.as_mapping(list_of_tokens, predicted_tags[::-1][1:-1])
+        return predicted_tags[::-1][1:-1]
 
     def _forward_track(self, tag_set, list_of_tokens, ):
-        v_table = defaultdict(list)
-        b_table = defaultdict(list)
-        for token_idx in range(0, len(list_of_tokens) + 1):
+        v_table = defaultdict(dict)
+        b_table = defaultdict(dict)
+        v_table[0] = {START_TAG: 1}
+        b_table[0] = {START_TAG: START_TAG}
+        for token_idx, token in enumerate(list_of_tokens):
             for tag in tag_set:
                 if token_idx == 0:
                     emission_prob = self._emission_matrix.infer(prior=tag, target=list_of_tokens[token_idx])
                     transition_prob = self._transition_matrix.infer(prior=START_TAG, target=tag)
                     max_v_tag_prob_pair = (tag, log(transition_prob) + log(emission_prob))
-                elif token_idx == len(list_of_tokens):
-                    transition_prob = self._transition_matrix.infer(prior=tag, target=END_TAG)
-                    max_v_tag_prob_pair = (tag, log(transition_prob) + v_table[tag][token_idx - 1])
+
                 else:
                     trellis = []
                     emission_prob = self._emission_matrix.infer(prior=tag, target=list_of_tokens[token_idx])
-                    for key in v_table.keys():
-                        transition_prob = self._transition_matrix.infer(prior=key, target=tag)
-                        previous_v = v_table[key][token_idx - 1]  # already in log
-                        trellis.append((key, log(transition_prob) + log(emission_prob) + previous_v))
+                    for previous_tag in tag_set:
+                        transition_prob = self._transition_matrix.infer(prior=previous_tag, target=tag)
+                        previous_v = v_table[token_idx][previous_tag]  # already in log
+                        trellis.append((previous_tag, log(transition_prob) + log(emission_prob) + previous_v))
                     max_v_tag_prob_pair = sorted(trellis, key=lambda i: i[1])[-1]
-                v_table[tag].append(max_v_tag_prob_pair[1])
-                b_table[tag].append(max_v_tag_prob_pair[0])
+
+                v_table[token_idx + 1][tag] = max_v_tag_prob_pair[1]
+                b_table[token_idx + 1][tag] = (max_v_tag_prob_pair[0])
+        # for the closing tag
+        closing_trellis = [(t, log(self._transition_matrix.infer(prior=t, target=END_TAG))
+                            + v_table[len(list_of_tokens)][t]) for t in tag_set]
+        max_v_tag_prob_pair = sorted(closing_trellis, key=lambda i: i[1])[-1]
+        v_table[len(list_of_tokens) + 1] = {END_TAG: max_v_tag_prob_pair[1]}
+        b_table[len(list_of_tokens) + 1] = {END_TAG: max_v_tag_prob_pair[0]}
         return v_table, b_table
 
 
@@ -141,7 +166,7 @@ class MostProbablePOSTagger(POSTagger):
         """
         predicted_tags = list()
         # perform forward pass
-        tagset = self._transition_matrix.get_unique_prior_tokens()
+        tagset = self.get_tagset()
         alpha_table = self._forward_track(tagset, list_of_tokens)
         beta_table = self._backward_track(tagset, list_of_tokens)
         # confirmed that alpha[q_f] == beta[q_0]
@@ -264,7 +289,7 @@ def resolve_taggers(tagger_type) -> List[Type[POSTagger]]:
     elif tagger_type == "local_decoding":
         taggers.append(MostProbablePOSTagger)
     elif tagger_type == "all":
-        taggers.extend([EagerTagger, VibertiPOSTagger, MostProbablePOSTagger])
+        taggers.extend([EagerTagger, MostProbablePOSTagger])  # ([EagerTagger, VibertiPOSTagger, MostProbablePOSTagger]
     else:
         raise Exception(f"Cannot resolve the tagger type [{tagger_type}]")
     return taggers

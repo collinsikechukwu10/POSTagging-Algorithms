@@ -36,9 +36,5 @@ def conllu_corpus(path):
 def tokenize_text(text: AnyStr) -> List[AnyStr]:
     return WhitespaceTokenizer().tokenize(text)
 
-# -------------------------
-# PLOTTING HELPER FUNCTIONS
-# -------------------------
-def plot_confusion_matrix():
-    ax = sns.heatmap(uniform_data, linewidth=0.5)
-    plt.show()
+
+
