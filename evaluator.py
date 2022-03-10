@@ -1,6 +1,6 @@
+import json
 from collections import defaultdict
 from typing import List, Type, Dict, AnyStr
-
 from dataset import SentenceDataset, TreeBankDataset
 from probability import create_transition_probability_matrix, create_emission_probability_matrix
 from tagger import POSTagger
@@ -23,6 +23,13 @@ class POSTagConfusionMatrix:
         print(format_row.format("", *self._keys))
         for key, val in self._table.items():
             print(format_row.format(key, val.values()))
+
+    def to_json(self):
+        return json.dumps(self, default=lambda o: o.__dict__,
+                          sort_keys=True, indent=4)
+
+    def __str__(self):
+        return self.to_json()
 
 
 def evaluate(sample_data: SentenceDataset, taggers: List[POSTagger]) -> Dict[AnyStr, POSTagConfusionMatrix]:
@@ -51,12 +58,13 @@ def evaluate_treebank_dataset(treebank_dataset: TreeBankDataset, tagger_classes:
     # get emission probability
     emission_probability = create_emission_probability_matrix(train_dataset)
     taggers = [tagger_class(emission_probability, transition_probability) for tagger_class in tagger_classes]
-    confusion_matrices[treebank_dataset.name() + "(train)"] = evaluate(train_dataset.sentences(), taggers)
-    confusion_matrices[treebank_dataset.name() + "(test)"] = evaluate(test_dataset.sentences(), taggers)
+    confusion_matrices[treebank_dataset.name() + "(train)"] = evaluate(train_dataset, taggers)
+    confusion_matrices[treebank_dataset.name() + "(test)"] = evaluate(test_dataset, taggers)
     return confusion_matrices
 
 
-def test_treebank_dataset(treebank_dataset: TreeBankDataset, tagger_classes: List[Type[POSTagger]], string: AnyStr) -> Dict[
+def test_treebank_dataset(treebank_dataset: TreeBankDataset, tagger_classes: List[Type[POSTagger]], string: AnyStr) -> \
+Dict[
     AnyStr, List[AnyStr]]:
     result = {}
     train_dataset = treebank_dataset.train_data()
@@ -65,5 +73,5 @@ def test_treebank_dataset(treebank_dataset: TreeBankDataset, tagger_classes: Lis
     emission_probability = create_emission_probability_matrix(train_dataset)
     for tagger_class in tagger_classes:
         tagger = tagger_class(emission_probability, transition_probability)
-        result[tagger_class.name()] = tagger.get_tags(tokenize_text(string))
+        result[tagger_class.name()] = tagger.get_tags(tokenize_text(string), as_mapping=True)
     return result

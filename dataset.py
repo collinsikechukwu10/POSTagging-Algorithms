@@ -5,6 +5,17 @@ from conllu.models import Token
 
 from utils import conllu_corpus, get_words_and_tags
 
+DATASET_LIST = {
+    "en": "UD_English-EWT",
+    "du": "UD_Dutch-Alpino",
+    "esp": "UD_Spanish-GSD",
+}
+
+
+def get_dataset_from_code(code: str) -> str:
+    return os.path.join(DEFAULT_TREEBANKS_PATH, DATASET_LIST.get(code, ""))
+
+
 DEFAULT_TREEBANKS_PATH = os.path.join(os.path.dirname(__file__), "treebanks")
 START_TAG = "<s>"
 END_TAG = "</s>"
@@ -53,13 +64,13 @@ class TreeBankDataset:
         conllu_files = os.listdir(tree_bank_directory)
         train_corpus = list(filter(lambda i: "train.conllu" in i, conllu_files))[0]
         test_corpus = list(filter(lambda i: "test.conllu" in i, conllu_files))[0]
-        train_sentences = conllu_corpus(train_corpus)
-        test_sentences = conllu_corpus(test_corpus)
+        train_sentences = conllu_corpus(os.path.join(tree_bank_directory, train_corpus))
+        test_sentences = conllu_corpus(os.path.join(tree_bank_directory, test_corpus))
         self._train_dataset = SentenceDataset(train_sentences)
         self._test_dataset = SentenceDataset(test_sentences)
 
-        print("Generating dataset for ")
-        print(f"{len(self._train_dataset)} training sentences, {len(self._test_dataset)} test sentences")
+        print(f"Generating dataset for {train_corpus.replace('train.conllu', '')}" +
+              f" Sentences: [Training: {len(self._train_dataset)}], [Test: {len(self._test_dataset)}]")
 
     def train_data(self) -> SentenceDataset:
         return self._train_dataset
@@ -69,10 +80,6 @@ class TreeBankDataset:
 
     def name(self):
         return self._name
-
-
-def prepare_datasets(main_directory) -> Iterable[TreeBankDataset]:
-    return [TreeBankDataset(os.path.join(main_directory, treebank)) for treebank in os.listdir(main_directory)]
 
 
 def is_conllu_language_dataset_folder(directory):
@@ -94,12 +101,12 @@ def get_datasets_folders(directory):
     return folders
 
 
-def resolve_datasets(dataset_dir: str) -> Iterable[TreeBankDataset]:
+def resolve_datasets(dataset_code: str) -> Iterable[TreeBankDataset]:
     datasets = []
-    if dataset_dir == "all" or datasets == "":
+    if dataset_code == "all" or datasets == "":
         # run all data sets that exists based on the default path
         datasets += get_datasets_folders(DEFAULT_TREEBANKS_PATH)
     else:
-        datasets += get_datasets_folders(dataset_dir)
+        datasets += get_datasets_folders(get_dataset_from_code(dataset_code))
     for dataset in datasets:
         yield TreeBankDataset(dataset)
