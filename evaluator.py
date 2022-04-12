@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import datetime as dt
 import os
-from dataset import SentenceDataset, TreeBankDataset, START_TAG, END_TAG
+from dataset import SentenceDataset, TreeBankDataset, START_TAG, END_TAG, DatasetAdjuster
 from probability import create_transition_probability_matrix, create_emission_probability_matrix
 from tagger import POSTagger
 from utils import get_word, get_pos_tag, tokenize_text
@@ -21,7 +21,8 @@ class JSONSerializable:
 
 
 class POSTagConfusionMatrix(JSONSerializable):
-    def __init__(self, tags):
+    def __init__(self, tags, tagger):
+        self.title = tagger.__class__.__name__
         self._keys = tags
         self._table = defaultdict(dict)
         for tag in tags:
@@ -47,16 +48,15 @@ class POSTagConfusionMatrix(JSONSerializable):
 
 class Performance(JSONSerializable):
     def __init__(self, dataset: SentenceDataset, cm: POSTagConfusionMatrix):
+        self._dataset = dataset
         self._p = dict()
         self._cm = cm
-        keys = cm.get_keys()
-        # remove start and end tag as they would cause zero division error
         count = 0
         for key in cm.get_keys():
             key_count = cm.get(key, key)
             self._p[key] = key_count / dataset.get_pos_tag_freq_dist()[key]
             count += key_count
-        self._p["total_performance"] = count / dataset.get_pos_tag_freq_dist().N()
+        self._p["total"] = count / dataset.get_pos_tag_freq_dist().N()
 
     def get_cm(self):
         return self._cm
@@ -64,54 +64,69 @@ class Performance(JSONSerializable):
     def get_performance(self):
         return self._p
 
-
-def plot_performances(dict_of_performances):
-    print("Generating plots...")
-    folder_name = dt.datetime.now()
-    folder_path = os.path.join(OUTPUT_PATH, str(folder_name))
-    os.mkdir(folder_path)
-    for key, performance in dict_of_performances.items():
-        plot_confusion_matrix(performance.get_cm(), os.path.join(folder_path, f"confusion_matrix_{key}.png"))
-
-    # create combined bar chart showing performance
-    df = pd.DataFrame({k: v.get_performance() for k, v in dict_of_performances.items()})
-    fig0 = plt.figure(figsize=(20, 20))
-    ax0 = fig0.add_subplot(111)
-    df.plot(kind="bar", ax=ax0)
-    # plt.show()
-    plt.savefig(os.path.join(folder_path, f"performance.png"), transparent=True)
+    def get_dataset(self):
+        return self._dataset
 
 
 def evaluate(sample_data: SentenceDataset, taggers: List[POSTagger]) -> Dict[AnyStr, Performance]:
     # should return a confusion matrix
-    cms = dict()
+    performances: Dict[AnyStr, Performance] = dict()
     for tagger in taggers:
         print(f"Using {tagger.__class__.__name__} for tagging")
-        cm = POSTagConfusionMatrix(sample_data.unique_tags())
+        cm = POSTagConfusionMatrix(sample_data.unique_tags(), tagger)
         for sentence in sample_data.sentences():
             words = [get_word(t) for t in sentence]
             actual_tags = [get_pos_tag(t) for t in sentence]
             predicted_tags = tagger.get_tags(words, as_mapping=False)
             for (actual, predicted) in zip(actual_tags, predicted_tags):
-                # print(f"Actual: {actual}, Predicted:{predicted}")
                 cm.increment(actual, predicted)
-        cms[tagger.name()] = Performance(sample_data, cm)
-    # plot accuracy
-    plot_performances(cms)
-    return cms
+        performances[tagger.name()] = Performance(sample_data, cm)
+    # prepare exports
+    print("Generating plots...")
+    folder_name = dt.datetime.now()
+    folder_path = os.path.join(OUTPUT_PATH, f"{sample_data.dataset_name}__{folder_name.strftime('%d-%m-%Y %H:%M:%S')}")
+    os.mkdir(folder_path)
+
+    # plot confusion matrix
+    for key, performance in performances.items():
+        plot_confusion_matrix(performance.get_cm(), os.path.join(folder_path, f"confusion_matrix_{key}.png"))
+
+    # create combined bar chart showing performance
+    df = pd.DataFrame({k: v.get_performance() for k, v in performances.items()})
+    fig0 = plt.figure(figsize=(20, 12))
+    ax0 = fig0.add_subplot(111)
+    df.round(2).plot(kind="bar", ax=ax0)
+    plt.xticks(fontsize=15)
+    plt.yticks(fontsize=15)
+    plt.title("Accuracy")
+    plt.savefig(os.path.join(folder_path, f"performance.png"))
+
+    # export performance to csv for processing later
+    df.to_csv(os.path.join(folder_path, f"performance.csv"))
+
+    return performances
 
 
 def evaluate_treebank_dataset(treebank_dataset: TreeBankDataset, tagger_classes: List[Type[POSTagger]]) -> \
         Dict[AnyStr, Dict[AnyStr, Performance]]:
+
+    # apply replacements if they exist
+    replacements = DatasetAdjuster.get_replacements()
+    for new_tag, old_tags in replacements.items():
+        DatasetAdjuster.merge_tags(treebank_dataset, old_tags, new_tag)
+
+    # get training and testing dataset
     train_dataset = treebank_dataset.train_data()
     test_dataset = treebank_dataset.test_data()
-    performance = dict()
+
     # get transition probability and emission probability using training data
     transition_probability = create_transition_probability_matrix(train_dataset)
     emission_probability = create_emission_probability_matrix(train_dataset)
+    # create taggers
     taggers = [tagger_class(emission_probability, transition_probability) for tagger_class in tagger_classes]
-    performance[treebank_dataset.name()] = evaluate(test_dataset, taggers)
-    return performance
+    # evaluate on TESTING data
+    evaluation = evaluate(test_dataset, taggers)
+    return {treebank_dataset.name(): evaluation}
 
 
 def test_treebank_dataset(treebank_dataset: TreeBankDataset, tagger_classes: List[Type[POSTagger]], string: AnyStr) -> \
@@ -135,4 +150,7 @@ def plot_confusion_matrix(matrix: POSTagConfusionMatrix, path):
     fig1 = plt.figure(figsize=(20, 20))
     ax = fig1.add_subplot(111)
     sns.heatmap(matrix.to_dataframe(), annot=True, vmin=-1, ax=ax, fmt=".5g")
-    plt.savefig(path, transparent=True)
+    plt.title(matrix.title)
+    plt.xticks(fontsize=15)
+    plt.yticks(fontsize=15)
+    plt.savefig(path)

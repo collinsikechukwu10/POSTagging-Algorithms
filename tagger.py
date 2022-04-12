@@ -73,7 +73,7 @@ class EagerTagger(POSTagger):
             transition_prob = self._transition_matrix.infer(prior=previous_tag, target=tag)
             emission_prob = self._emission_matrix.infer(prior=tag, target=current_token)
             tagset_probabilities.append((tag, transition_prob * emission_prob))
-        max_tag_prob_pair = sorted([(k, v) for (k, v) in tagset_probabilities], key=lambda v: v[1])[-1]
+        max_tag_prob_pair = max(tagset_probabilities, key=lambda v: v[1])
         return max_tag_prob_pair[0]
 
     def get_tags(self, list_of_tokens: List[AnyStr], as_mapping: bool = False) -> Union[List[AnyStr], Dict[AnyStr,
@@ -94,7 +94,7 @@ class EagerTagger(POSTagger):
         return predicted_tags
 
 
-class VibertiPOSTagger(POSTagger):
+class ViterbiPOSTagger(POSTagger):
     def get_tags(self, list_of_tokens, as_mapping=False):
         """
         Get tags for a list of tokens
@@ -116,11 +116,6 @@ class VibertiPOSTagger(POSTagger):
             else:
                 predicted_tags.append(tracker)
                 tracker = v[tracker]
-            # k = v
-        # while i >= 0:
-        #     max_tag_prob_pair = sorted([(k, v[i]) for k, v in b_table.items()], key=lambda v: v[1])[-1]
-        #     predicted_tags.append(max_tag_prob_pair[0])
-        #     i -= 1
         if as_mapping:
             return self.as_mapping(list_of_tokens, predicted_tags[::-1][1:-1])
         return predicted_tags[::-1][1:-1]
@@ -144,7 +139,7 @@ class VibertiPOSTagger(POSTagger):
                         transition_prob = self._transition_matrix.infer(prior=previous_tag, target=tag)
                         previous_v = v_table[token_idx][previous_tag]  # already in log
                         trellis.append((previous_tag, log(transition_prob) + log(emission_prob) + previous_v))
-                    max_v_tag_prob_pair = sorted(trellis, key=lambda i: i[1])[-1]
+                    max_v_tag_prob_pair = max(trellis, key=lambda i: i[1])
 
                 v_table[token_idx + 1][tag] = max_v_tag_prob_pair[1]
                 b_table[token_idx + 1][tag] = (max_v_tag_prob_pair[0])
@@ -169,10 +164,9 @@ class MostProbablePOSTagger(POSTagger):
         tagset = self.get_tagset()
         alpha_table = self._forward_track(tagset, list_of_tokens)
         beta_table = self._backward_track(tagset, list_of_tokens)
-        # confirmed that alpha[q_f] == beta[q_0]
-        # alpha and beta table should be the same size
+        # alpha and beta table are the same size and confirmed that alpha[q_f] == beta[q_0]
         gamma_table = self._combine_table(alpha_table, beta_table)
-        # get tags for the seentence
+        # get tags for the sentence
         for i in range(1, len(list_of_tokens) + 1):
             max_tag_prob_pair = sorted(gamma_table[i].items(), key=lambda v: v[1])[-1]
             predicted_tags.append(max_tag_prob_pair[0])
@@ -285,11 +279,11 @@ def resolve_taggers(tagger_type) -> List[Type[POSTagger]]:
     if tagger_type == "eager":
         taggers.append(EagerTagger)
     elif tagger_type == "viterbi":
-        taggers.append(VibertiPOSTagger)
+        taggers.append(ViterbiPOSTagger)
     elif tagger_type == "local_decoding":
         taggers.append(MostProbablePOSTagger)
     elif tagger_type == "all":
-        taggers.extend([EagerTagger, MostProbablePOSTagger])  # ([EagerTagger, VibertiPOSTagger, MostProbablePOSTagger]
+        taggers.extend([EagerTagger, ViterbiPOSTagger, MostProbablePOSTagger])  # [EagerTagger, MostProbablePOSTagger]
     else:
         raise Exception(f"Cannot resolve the tagger type [{tagger_type}]")
     return taggers

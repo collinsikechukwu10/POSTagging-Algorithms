@@ -20,7 +20,7 @@ def run_program(type_, dataset_code, tagger_type, test_string=""):
         if type_ == "eval":
             conf_matrix = dict()
             for dataset in resolve_datasets(dataset_code):
-                print(f"Evaluating Treebank test dataset: {dataset.name()}")
+                print(f"**** Evaluating Treebank test dataset: {dataset.name()} ****")
                 conf_m = evaluate_treebank_dataset(dataset, taggers)
                 conf_matrix.update(conf_m)
         elif type_ == "test":
